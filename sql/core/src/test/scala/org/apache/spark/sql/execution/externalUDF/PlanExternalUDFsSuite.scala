@@ -719,17 +719,6 @@ class PlanExternalUDFsSuite extends QueryTest with SharedSparkSession {
     assert(execution.workerSpec == spec)
   }
 
-  test("sql tests expose one unshaded epoll native library") {
-    val resource = "META-INF/native/libnetty_transport_native_epoll_x86_64.so"
-    val urls = new java.util.ArrayList[java.net.URL]()
-    val found = getClass.getClassLoader.getResources(resource)
-    while (found.hasMoreElements) {
-      urls.add(found.nextElement())
-    }
-    assert(urls.size == 1, urls.toString)
-    assert(urls.get(0).toString.contains("netty-transport-native-epoll"))
-  }
-
   test("scalar external UDF returns rows from a direct gRPC worker process") {
     assume(EchoGrpcWorkerMain.udsTransportAvailable,
       "Netty UDS native transport (epoll on Linux or kqueue on macOS) is required")

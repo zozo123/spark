@@ -59,8 +59,9 @@ object BuildCommons {
     Seq("connect-common", "connect", "connect-client-jdbc", "connect-client-jvm", "connect-shims")
       .map(ProjectRef(buildLocation, _))
 
-  val udfWorkerProjects@Seq(udfWorkerProto, udfWorkerCore, udfWorkerGrpc) =
-    Seq("udf-worker-proto", "udf-worker-core", "udf-worker-grpc").map(ProjectRef(buildLocation, _))
+  val udfWorkerProjects@Seq(udfWorkerProto, udfWorkerCore, udfWorkerGrpc, udfWorkerRuntime) =
+    Seq("udf-worker-proto", "udf-worker-core", "udf-worker-grpc", "udf-worker-runtime")
+      .map(ProjectRef(buildLocation, _))
 
   val allProjects@Seq(
     core, graphx, mllib, mllibLocal, repl, networkCommon, networkShuffle, launcher, unsafe, tags, sketch, kvstore,
@@ -420,7 +421,7 @@ object SparkBuild extends PomBuild {
       unsafe, tags, tokenProviderKafka010, sqlKafka010, pipelines, connectCommon, connect,
       connectJdbc, connectClient, variant, connectShims, profiler, credentialAws,
       commonUtilsJava, sparkConfig,
-      udfWorkerProto, udfWorkerCore, udfWorkerGrpc
+      udfWorkerProto, udfWorkerCore, udfWorkerGrpc, udfWorkerRuntime
     ).contains(x)
   }
 
@@ -478,6 +479,9 @@ object SparkBuild extends PomBuild {
 
   /* UDF Worker gRPC settings */
   enable(UDFWorkerGrpc.settings)(udfWorkerGrpc)
+
+  /* UDF Worker runtime settings */
+  enable(UDFWorkerRuntime.settings)(udfWorkerRuntime)
 
   /* Config module protobuf settings */
   enable(SparkConfig.settings)(sparkConfig)
@@ -1201,6 +1205,68 @@ object UDFWorkerGrpc {
   }
 }
 
+object UDFWorkerRuntime {
+  val buildTestDeps = TaskKey[Unit]("buildTestDeps", "Build needed dependencies for test.")
+
+  // Packages udf-worker-grpc with gRPC and Guava relocated under
+  // org.sparkproject.spark_udf_worker, so the direct dispatcher can sit on the Spark
+  // runtime classpath. Netty and protobuf-java stay unrelocated and unbundled: gRPC
+  // uses Spark's Netty and its native transports, and the stubs must share protobuf
+  // with the udf-worker-proto messages. CopyDependencies puts the assembly output in
+  // the jars directory. This needs to be consistent with the content of
+  // `maven-shade-plugin` in udf/worker/runtime/pom.xml.
+  lazy val settings = Seq(
+    (assembly / test) := { },
+
+    (assembly / logLevel) := Level.Info,
+
+    // Exclude `scala-library` from assembly.
+    (assembly / assemblyPackageScala / assembleArtifact) := false,
+
+    (assembly / assemblyExcludedJars) := {
+      val cp = (assembly / fullClasspath).value
+      val validPrefixes = Set("spark-udf-worker-grpc", "grpc-", "perfmark-api", "guava-",
+        "failureaccess-", "gson-", "annotations-", "animal-sniffer-annotations")
+      cp filterNot { v =>
+        validPrefixes.exists(v.data.getName.startsWith)
+      }
+    },
+
+    (assembly / assemblyShadeRules) := Seq(
+      ShadeRule.rename("io.grpc.**" -> "org.sparkproject.spark_udf_worker.grpc.@1").inAll,
+      ShadeRule.rename("com.google.common.**" ->
+        "org.sparkproject.spark_udf_worker.guava.@1").inAll,
+      ShadeRule.rename("com.google.thirdparty.**" ->
+        "org.sparkproject.spark_udf_worker.guava.thirdparty.@1").inAll,
+      ShadeRule.rename("io.perfmark.**" ->
+        "org.sparkproject.spark_udf_worker.io_perfmark.@1").inAll,
+      ShadeRule.rename("com.google.gson.**" -> "org.sparkproject.spark_udf_worker.gson.@1").inAll,
+      ShadeRule.rename("android.annotation.**" ->
+        "org.sparkproject.spark_udf_worker.android_annotation.@1").inAll,
+      ShadeRule.rename("org.codehaus.mojo.animal_sniffer.**" ->
+        "org.sparkproject.spark_udf_worker.animal_sniffer.@1").inAll
+    ),
+
+    (assembly / assemblyMergeStrategy) := {
+      case m if m.toLowerCase(Locale.ROOT).endsWith("manifest.mf") => MergeStrategy.discard
+      case m if m.toLowerCase(Locale.ROOT).matches("meta-inf.*\\.sf$") => MergeStrategy.discard
+      case m if m.toLowerCase(Locale.ROOT).startsWith("meta-inf/services/") =>
+        MergeStrategy.filterDistinctLines
+      case m if m.toLowerCase(Locale.ROOT).endsWith(".proto") => MergeStrategy.discard
+      // Bundled libraries' module descriptors do not describe the shaded jar.
+      case m if m.endsWith("module-info.class") => MergeStrategy.discard
+      case _ => MergeStrategy.first
+    },
+
+    // The tests check the jars directory that `assembly/package` produces.
+    buildTestDeps := {
+      (LocalProject("assembly") / Compile / Keys.`package`).value
+    },
+    test := ((Test / test) dependsOn (buildTestDeps)).value,
+    testOnly := ((Test / testOnly) dependsOn (buildTestDeps)).evaluated
+  )
+}
+
 object Unsafe {
   lazy val settings = Seq()
 }
@@ -1480,24 +1546,7 @@ object SQL {
     // sql/core uses protoc-jar-maven-plugin which outputs to target/generated-sources.
     (Compile / PB.targets) := Seq(
       PB.gens.java -> target.value / "generated-sources"
-    ),
-    // snowflake-jdbc 4.4.0 shades Woodstox and registers it as a StAX factory.
-    // XMLInputFactory.newInstance() then parses sql XML tests with Woodstox.
-    // Nested arrays come back with _corrupt_record, and numeric inference changes.
-    // Drop the factory registrations. Shaded Woodstox classes stay for Snowflake.
-    (Test / fullClasspath) := {
-      val cp = (Test / fullClasspath).value
-      val dest = target.value / "test-classpath"
-      cp.map { entry =>
-        val jar = entry.data
-        val name = jar.getName
-        if (name.startsWith("snowflake-jdbc-") && name.endsWith(".jar")) {
-          entry.map(_ => stripSnowflakeStaxServices(jar, dest))
-        } else {
-          entry
-        }
-      }
-    }
+    )
   ) ++ {
     val sparkProtocExecPath = sys.props.get("spark.protoc.executable.path")
     if (sparkProtocExecPath.isDefined) {
@@ -1506,54 +1555,6 @@ object SQL {
       )
     } else {
       Seq.empty
-    }
-  }
-
-  private val snowflakeStaxServices = Set(
-    "META-INF/services/javax.xml.stream.XMLInputFactory",
-    "META-INF/services/javax.xml.stream.XMLOutputFactory",
-    "META-INF/services/javax.xml.stream.XMLEventFactory"
-  )
-
-  private def stripSnowflakeStaxServices(jar: File, destDir: File): File = {
-    val stripped = destDir / s"${jar.getName.stripSuffix(".jar")}-no-stax-services.jar"
-    if (stripped.exists() && stripped.lastModified() >= jar.lastModified()) {
-      stripped
-    } else {
-      IO.createDirectory(destDir)
-      val tmp = destDir / (stripped.getName + ".tmp")
-      val in = new java.util.zip.ZipInputStream(new BufferedInputStream(new FileInputStream(jar)))
-      val out = new java.util.zip.ZipOutputStream(
-        new BufferedOutputStream(new FileOutputStream(tmp)))
-      try {
-        val buffer = new Array[Byte](8192)
-        var entry = in.getNextEntry
-        while (entry != null) {
-          if (!snowflakeStaxServices.contains(entry.getName)) {
-            val copied = new java.util.zip.ZipEntry(entry.getName)
-            copied.setTime(entry.getTime)
-            out.putNextEntry(copied)
-            var read = in.read(buffer)
-            while (read >= 0) {
-              if (read > 0) {
-                out.write(buffer, 0, read)
-              }
-              read = in.read(buffer)
-            }
-            out.closeEntry()
-          }
-          in.closeEntry()
-          entry = in.getNextEntry
-        }
-      } finally {
-        in.close()
-        out.close()
-      }
-      if (stripped.exists()) {
-        IO.delete(stripped)
-      }
-      IO.move(tmp, stripped)
-      stripped
     }
   }
 }
@@ -1922,7 +1923,7 @@ object Unidoc {
       inAnyProject -- inProjects(OldDeps.project, repl, examples, tools, kubernetes,
         yarn, tags, streamingKafka010, sqlKafka010, connectCommon, connect, connectJdbc,
         connectClient, connectShims, protobuf, profiler, udfWorkerProto, udfWorkerCore,
-        udfWorkerGrpc),
+        udfWorkerGrpc, udfWorkerRuntime),
   )
 }
 
@@ -1956,6 +1957,7 @@ object CopyDependencies {
       val fid = (LocalProject("connect") / assembly).value
       val fidClient = (LocalProject("connect-client-jvm") / assembly).value
       val fidProtobuf = (LocalProject("protobuf") / assembly).value
+      val fidUdfWorkerRuntime = (LocalProject("udf-worker-runtime") / assembly).value
       val noProvidedSparkJars: Boolean = sys.env.getOrElse("NO_PROVIDED_SPARK_JARS", "1") == "1" ||
         sys.env.getOrElse("NO_PROVIDED_SPARK_JARS", "true")
           .toLowerCase(Locale.getDefault()) == "true"
@@ -1983,6 +1985,10 @@ object CopyDependencies {
             if (!noProvidedSparkJars) {
               Files.copy(fidProtobuf.toPath, destJar.toPath)
             }
+          } else if (jar.getName.contains("spark-udf-worker-grpc")) {
+            // Don't copy the UDF worker gRPC JAR as it is shaded in the UDF worker runtime.
+          } else if (jar.getName.contains("spark-udf-worker-runtime")) {
+            Files.copy(fidUdfWorkerRuntime.toPath, destJar.toPath)
           } else {
             Files.copy(jar.toPath(), destJar.toPath())
           }

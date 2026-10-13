@@ -115,6 +115,7 @@
     <module>udf/worker/proto</module>
     <module>udf/worker/core</module>
     <module>udf/worker/grpc</module>
+    <module>udf/worker/runtime</module>
     <!-- See additional modules enabled by profiles below -->
   </modules>
 
@@ -222,7 +223,7 @@
             SPARK-53327 workaround should be reverted.
      -->
     <datasketches.version>6.2.0</datasketches.version>
-    <netty.version>4.2.18.Final</netty.version>
+    <netty.version>4.2.19.Final</netty.version>
     <netty-tcnative.version>2.0.84.Final</netty-tcnative.version>
     <icu4j.version>78.3</icu4j.version>
     <junit.version>6.0.3</junit.version>
@@ -352,7 +353,7 @@
     <mssql.jdbc.version>13.2.1.jre11</mssql.jdbc.version>
     <ojdbc17.version>23.26.1.0.0</ojdbc17.version>
     <databricks.jdbc.version>3.3.1</databricks.jdbc.version>
-    <snowflake.jdbc.version>4.4.0</snowflake.jdbc.version>
+    <snowflake.jdbc.version>4.1.0</snowflake.jdbc.version>
     <terajdbc.version>20.00.00.39</terajdbc.version>
     <!-- Used for SBT build to retrieve the Spark version -->
     <spark.version>${project.version}</spark.version>
@@ -1422,9 +1423,15 @@
       </dependency>
       <dependency>
         <groupId>net.snowflake</groupId>
-        <artifactId>snowflake-jdbc</artifactId>
+        <artifactId>snowflake-jdbc-thin</artifactId>
         <version>${snowflake.jdbc.version}</version>
         <scope>test</scope>
+        <exclusions>
+          <exclusion>
+            <groupId>*</groupId>
+            <artifactId>*</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>com.teradata.jdbc</groupId>
