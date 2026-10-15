@@ -124,11 +124,11 @@ object UdfWorkerRuntimeSparkSubmitSuite extends Assertions {
     val runtimeJar = jarFile(initUrls.head)
     assert(runtimeJar.getName.startsWith("spark-udf-worker-runtime"), runtimeJar.getPath)
 
-    val factoryClass = Class.forName(DispatcherFactory, false, loader)
+    val factoryClass = loader.loadClass(DispatcherFactory)
     assert(codeSource(factoryClass) == runtimeJar, codeSource(factoryClass).getPath)
     assert(factoryClass.getConstructor().newInstance().getClass == factoryClass)
 
-    val grpcClass = Class.forName(UdfGrpcProvider, false, loader)
+    val grpcClass = loader.loadClass(UdfGrpcProvider)
     assert(codeSource(grpcClass) == runtimeJar, codeSource(grpcClass).getPath)
     assertDistinctConnectSource(loader, runtimeJar)
     assertJarLayout(runtimeJar)
@@ -139,7 +139,7 @@ object UdfWorkerRuntimeSparkSubmitSuite extends Assertions {
   private def assertDistinctConnectSource(loader: ClassLoader, runtimeJar: File): Unit = {
     val resource = ConnectGrpcProvider.replace('.', '/') + ".class"
     if (loader.getResources(resource).asScala.nonEmpty) {
-      val connectClass = Class.forName(ConnectGrpcProvider, false, loader)
+      val connectClass = loader.loadClass(ConnectGrpcProvider)
       val connectJar = codeSource(connectClass)
       assert(connectJar != runtimeJar, connectJar.getPath)
       assert(connectJar.getName.contains("spark-connect"), connectJar.getPath)
