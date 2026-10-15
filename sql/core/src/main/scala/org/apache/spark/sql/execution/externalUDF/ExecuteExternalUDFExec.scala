@@ -23,7 +23,6 @@ import java.nio.channels.Channels
 import scala.jdk.CollectionConverters._
 import scala.util.control.NonFatal
 
-import com.google.protobuf.UnsafeByteOperations
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.{VectorLoader, VectorSchemaRoot}
 import org.apache.arrow.vector.ipc.WriteChannel
@@ -44,7 +43,8 @@ import org.apache.spark.sql.execution.python.HybridRowQueue
 import org.apache.spark.sql.types.{StructField, StructType}
 import org.apache.spark.sql.util.ArrowUtils
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnarBatch, ColumnVector}
-import org.apache.spark.udf.worker.{DataRequest, DataResponse, UDFWorkerSpecification}
+import org.apache.spark.udf.worker.{DataResponse, UDFWorkerSpecification}
+import org.apache.spark.udf.worker.core.WorkerMessages
 
 /**
  * :: Experimental ::
@@ -123,11 +123,7 @@ case class ExecuteExternalUDFExec(
           true,
           largeVarTypes,
           context)
-        val requests = batches.map { batch =>
-          DataRequest.newBuilder()
-            .setData(UnsafeByteOperations.unsafeWrap(batch))
-            .build()
-        }
+        val requests = batches.map(WorkerMessages.dataRequest)
         val udfResults = new ArrowResponseRowIterator(
           session.process(requests),
           outputSchema,
@@ -252,7 +248,7 @@ object ExecuteExternalUDFExec {
         while (!rows.hasNext && !exhausted) {
           if (responses.hasNext) {
             val batch = ArrowConverters.loadBatch(
-              responses.next().getData.newInput(),
+              WorkerMessages.data(responses.next()),
               activeAllocator)
             try {
               new VectorLoader(activeRoot).load(batch)
