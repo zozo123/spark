@@ -59,10 +59,11 @@ import org.apache.spark.udf.worker.core.WorkerMessages
  * cannot distinguish logical types with identical Arrow layouts. Arrow record-batch compression
  * is self-describing, so responses may use any codec available from Arrow's compression factory.
  *
- * The dispatcher is intentionally not configured until a worker implementation is added, so
- * worker creation currently fails before any process is started. Before enabling a production
- * dispatcher, its transport must also add application-level flow control so a slow worker cannot
- * buffer an entire partition in the request stream and [[HybridRowQueue]].
+ * [[org.apache.spark.SparkEnv]] loads the direct dispatcher from the
+ * spark-udf-worker-runtime jar. The dispatcher starts a worker from the command in that
+ * UDF's specification, and an empty command fails before a process starts. Before this
+ * transport serves a production workload, it still needs application-level flow control so
+ * a slow worker cannot buffer an entire partition in the request stream and [[HybridRowQueue]].
  *
  * @param udf UDF expression evaluated by the worker session.
  * @param resultAttr Output attribute for the UDF expression.
