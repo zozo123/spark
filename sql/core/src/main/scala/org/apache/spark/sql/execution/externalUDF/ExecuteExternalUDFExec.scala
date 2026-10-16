@@ -61,9 +61,10 @@ import org.apache.spark.udf.worker.core.WorkerMessages
  *
  * [[org.apache.spark.SparkEnv]] loads the direct dispatcher from the
  * spark-udf-worker-runtime jar. The dispatcher starts a worker from the command in that
- * UDF's specification, and an empty command fails before a process starts. Before this
- * transport serves a production workload, it still needs application-level flow control so
- * a slow worker cannot buffer an entire partition in the request stream and [[HybridRowQueue]].
+ * UDF's specification, and an empty command fails before a process starts. The transport
+ * ships behind spark.sql.execution.udf.unified.execution.enabled, which defaults to false.
+ * Flow control is still required before that flag leaves experimental status, so a slow
+ * worker cannot buffer an entire partition in the request stream and [[HybridRowQueue]].
  *
  * @param udf UDF expression evaluated by the worker session.
  * @param resultAttr Output attribute for the UDF expression.

@@ -66,6 +66,14 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
         <configuration combine.self="override">
+          <!--
+            Packages the proto, core, and grpc modules with protobuf-java and
+            Guava, then relocates those libraries under
+            org.sparkproject.spark_udf_worker. Engine classes call
+            WorkerMessages and do not name com.google.protobuf. Netty stays
+            unrelocated because the Unix domain socket natives ship with
+            spark-core. Maven and sbt use these same relocation prefixes.
+          -->
           <shadedArtifactAttached>false</shadedArtifactAttached>
           <createDependencyReducedPom>true</createDependencyReducedPom>
           <artifactSet>
